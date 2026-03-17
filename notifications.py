@@ -1,4 +1,4 @@
-import smtplib, os
+﻿import smtplib, os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -7,10 +7,13 @@ SMTP_PORT = 465
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
 NOTIFY_FROM = "APPTS System"
-ENABLED = True
+ENABLED = bool(SMTP_USER and SMTP_PASS)
 
 def _send(to_email, subject, html):
     print(f"[NOTIFY] Sending to {to_email}")
+    if not ENABLED:
+        print("[NOTIFY] Email disabled - set SMTP_USER and SMTP_PASS env vars")
+        return
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -26,15 +29,15 @@ def _send(to_email, subject, html):
 
 def notify_otp(email, name, otp):
     print(f"\n{'='*60}\n  OTP:  {otp}  <-- USE THIS CODE\n{'='*60}\n")
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Your APPTS OTP</h2><div style='font-size:40px;font-weight:bold;color:#4f8ef7;letter-spacing:10px'>{otp}</div><p>Expires in 10 minutes.</p></div>"
+    html = f"<div style='font-family:Arial;padding:28px;text-align:center'><h2>Verify Your APPTS Account</h2><div style='font-size:42px;font-weight:bold;color:#4f8ef7;letter-spacing:12px;padding:16px;background:#f0f6ff;border-radius:10px'>{otp}</div><p>Expires in 10 minutes.</p></div>"
     _send(email, f"[APPTS] Your OTP Code: {otp}", html)
 
 def notify_task_assigned(engineer_email, engineer_name, task_name, project_name, deadline=None, description=None):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>New Task: {task_name}</h2><p>Project: {project_name}</p></div>"
+    html = f"<div style='font-family:Arial;padding:20px'><h2>New Task: {task_name}</h2><p>Project: {project_name}</p>{'<p>Deadline: '+deadline+'</p>' if deadline else ''}{'<p>'+description+'</p>' if description else ''}</div>"
     _send(engineer_email, f"[APPTS] New Task: {task_name}", html)
 
 def notify_task_completed(manager_email, manager_name, engineer_name, task_name, project_name):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Task Completed: {task_name}</h2><p>By: {engineer_name}</p></div>"
+    html = f"<div style='font-family:Arial;padding:20px'><h2>Task Completed: {task_name}</h2><p>Completed by: {engineer_name}</p><p>Project: {project_name}</p></div>"
     _send(manager_email, f"[APPTS] Task Completed: {task_name}", html)
 
 def notify_deadline_warning(engineer_email, engineer_name, task_name, project_name, deadline):
@@ -42,13 +45,13 @@ def notify_deadline_warning(engineer_email, engineer_name, task_name, project_na
     _send(engineer_email, f"[APPTS] Deadline Tomorrow: {task_name}", html)
 
 def notify_approval_request(admin_email, admin_name, new_user_name, new_user_email, role):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>New User: {new_user_name}</h2><p>Email: {new_user_email} | Role: {role}</p></div>"
+    html = f"<div style='font-family:Arial;padding:20px'><h2>New User: {new_user_name}</h2><p>Email: {new_user_email}</p><p>Role: {role}</p></div>"
     _send(admin_email, f"[APPTS] Approve User: {new_user_name}", html)
 
 def notify_user_approved(user_email, user_name):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Account Approved!</h2><p>Hi {user_name}, you can now log in.</p></div>"
+    html = f"<div style='font-family:Arial;padding:20px'><h2>Account Approved!</h2><p>Hi {user_name}, you can now log in to APPTS.</p></div>"
     _send(user_email, "[APPTS] Account Approved", html)
 
 def notify_user_rejected(user_email, user_name, reason=""):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Account Not Approved</h2><p>Hi {user_name}. {reason}</p></div>"
+    html = f"<div style='font-family:Arial;padding:20px'><h2>Account Not Approved</h2><p>Hi {user_name}.</p>{'<p>Reason: '+reason+'</p>' if reason else ''}</div>"
     _send(user_email, "[APPTS] Account Not Approved", html)
