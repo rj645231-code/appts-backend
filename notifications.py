@@ -1,11 +1,11 @@
-﻿import smtplib, os
+import smtplib, os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 465
-SMTP_USER = os.getenv("SMTP_USER", "rvlife9269@gmail.com")
-SMTP_PASS = os.getenv("SMTP_PASS", "uyqrrtunozxuwcmk")
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
 NOTIFY_FROM = "APPTS System"
 ENABLED = True
 
