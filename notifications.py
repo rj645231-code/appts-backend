@@ -14,13 +14,14 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER", "")        # your-email@gmail.com
-SMTP_PASS = os.getenv("SMTP_PASS", "")        # Gmail App Password
-NOTIFY_FROM = os.getenv("NOTIFY_FROM", "APPTS System")
+import os
 
-ENABLED = bool(SMTP_USER and SMTP_PASS)       # auto-disabled if not configured
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = os.getenv("SMTP_USER", "rvlife9269@gmail.com")
+SMTP_PASS = os.getenv("SMTP_PASS", "uyqrrtunozxuwcmk")
+NOTIFY_FROM = "APPTS System"
+ENABLED = bool(SMTP_USER and SMTP_PASS)
 
 
 def _send(to_email: str, subject: str, html: str):
@@ -126,7 +127,7 @@ def notify_otp(email: str, name: str, otp: str):
       </div>
     </div>
     """
-    _send(email, "[APPTS] Email Verification Code", html)
+    _send(email, f"[APPTS] Your OTP Code: {otp}", html)
 
 
 def notify_approval_request(admin_email: str, admin_name: str,
