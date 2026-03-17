@@ -1,57 +1,154 @@
-﻿import smtplib, os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import os
+import urllib.request
+import urllib.error
+import json
 
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 465
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
-NOTIFY_FROM = "APPTS System"
-ENABLED = bool(SMTP_USER and SMTP_PASS)
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_FMQr4MdT_D3pkFSP8JTc6XLciEYgD35z2")
+FROM_EMAIL = "onboarding@resend.dev"  # free resend sender — works without domain
+ENABLED = bool(RESEND_API_KEY)
 
-def _send(to_email, subject, html):
-    print(f"[NOTIFY] Sending to {to_email}")
+
+def _send(to_email: str, subject: str, html: str):
+    print(f"[NOTIFY] Sending to {to_email}: {subject}")
     if not ENABLED:
-        print("[NOTIFY] Email disabled - set SMTP_USER and SMTP_PASS env vars")
+        print("[NOTIFY] Email disabled - set RESEND_API_KEY")
         return
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = f"{NOTIFY_FROM} <{SMTP_USER}>"
-        msg["To"] = to_email
-        msg.attach(MIMEText(html, "html"))
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, to_email, msg.as_string())
-        print(f"[NOTIFY] SUCCESS sent to {to_email}")
-    except Exception as e:
-        print(f"[NOTIFY] FAILED: {type(e).__name__}: {e}")
+        payload = json.dumps({
+            "from": f"APPTS System <{FROM_EMAIL}>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+        }).encode("utf-8")
 
-def notify_otp(email, name, otp):
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            print(f"[NOTIFY] ✅ Email sent! ID: {result.get('id')}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[NOTIFY] ❌ HTTP {e.code}: {body}")
+    except Exception as e:
+        print(f"[NOTIFY] ❌ FAILED: {type(e).__name__}: {e}")
+
+
+def notify_otp(email: str, name: str, otp: str):
     print(f"\n{'='*60}\n  OTP:  {otp}  <-- USE THIS CODE\n{'='*60}\n")
-    html = f"<div style='font-family:Arial;padding:28px;text-align:center'><h2>Verify Your APPTS Account</h2><div style='font-size:42px;font-weight:bold;color:#4f8ef7;letter-spacing:12px;padding:16px;background:#f0f6ff;border-radius:10px'>{otp}</div><p>Expires in 10 minutes.</p></div>"
+    html = f"""
+    <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#4f8ef7;padding:20px;color:white"><h2 style="margin:0">🔐 Verify Your Email — APPTS</h2></div>
+      <div style="padding:28px;text-align:center">
+        <p>Hi <b>{name}</b>, welcome to APPTS!</p>
+        <p style="color:#555;margin:10px 0">Your verification code is:</p>
+        <div style="font-size:44px;font-weight:700;letter-spacing:14px;color:#4f8ef7;padding:20px;background:#f0f6ff;border-radius:10px;margin:16px 0">{otp}</div>
+        <p style="color:#999;font-size:13px">Expires in 10 minutes. Do not share this code.</p>
+      </div>
+    </div>"""
     _send(email, f"[APPTS] Your OTP Code: {otp}", html)
 
-def notify_task_assigned(engineer_email, engineer_name, task_name, project_name, deadline=None, description=None):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>New Task: {task_name}</h2><p>Project: {project_name}</p>{'<p>Deadline: '+deadline+'</p>' if deadline else ''}{'<p>'+description+'</p>' if description else ''}</div>"
+
+def notify_task_assigned(engineer_email: str, engineer_name: str,
+                          task_name: str, project_name: str,
+                          deadline: str = None, description: str = None):
+    html = f"""
+    <div style="font-family:Arial;max-width:540px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#4f8ef7;padding:20px;color:white"><h2 style="margin:0">📋 New Task Assigned</h2></div>
+      <div style="padding:24px">
+        <p>Hi <b>{engineer_name}</b>, a new task has been assigned to you.</p>
+        <table style="background:#f8f9fa;border-radius:8px;padding:16px;width:100%">
+          <tr><td><b>Task:</b></td><td>{task_name}</td></tr>
+          <tr><td><b>Project:</b></td><td>{project_name}</td></tr>
+          {"<tr><td><b>Deadline:</b></td><td>" + deadline + "</td></tr>" if deadline else ""}
+        </table>
+        {"<p><b>Description:</b> " + description + "</p>" if description else ""}
+        <p style="color:#666;font-size:13px;margin-top:16px">Log in to APPTS to view and update your task.</p>
+      </div>
+    </div>"""
     _send(engineer_email, f"[APPTS] New Task: {task_name}", html)
 
-def notify_task_completed(manager_email, manager_name, engineer_name, task_name, project_name):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Task Completed: {task_name}</h2><p>Completed by: {engineer_name}</p><p>Project: {project_name}</p></div>"
-    _send(manager_email, f"[APPTS] Task Completed: {task_name}", html)
 
-def notify_deadline_warning(engineer_email, engineer_name, task_name, project_name, deadline):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Deadline Tomorrow: {task_name}</h2><p>Due: {deadline}</p></div>"
-    _send(engineer_email, f"[APPTS] Deadline Tomorrow: {task_name}", html)
+def notify_task_completed(manager_email: str, manager_name: str,
+                           engineer_name: str, task_name: str, project_name: str):
+    html = f"""
+    <div style="font-family:Arial;max-width:540px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#22c55e;padding:20px;color:white"><h2 style="margin:0">✅ Task Completed</h2></div>
+      <div style="padding:24px">
+        <p>Hi <b>{manager_name}</b>,</p>
+        <p><b>{engineer_name}</b> has marked a task as completed.</p>
+        <table style="background:#f0fdf4;border-radius:8px;padding:16px;width:100%">
+          <tr><td><b>Task:</b></td><td>{task_name}</td></tr>
+          <tr><td><b>Project:</b></td><td>{project_name}</td></tr>
+        </table>
+      </div>
+    </div>"""
+    _send(manager_email, f"[APPTS] ✅ Task Completed: {task_name}", html)
 
-def notify_approval_request(admin_email, admin_name, new_user_name, new_user_email, role):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>New User: {new_user_name}</h2><p>Email: {new_user_email}</p><p>Role: {role}</p></div>"
+
+def notify_deadline_warning(engineer_email: str, engineer_name: str,
+                             task_name: str, project_name: str, deadline: str):
+    html = f"""
+    <div style="font-family:Arial;max-width:540px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#f59e0b;padding:20px;color:white"><h2 style="margin:0">⚠️ Deadline Tomorrow</h2></div>
+      <div style="padding:24px">
+        <p>Hi <b>{engineer_name}</b>, your task deadline is tomorrow!</p>
+        <table style="background:#fff8e1;border-radius:8px;padding:16px;width:100%">
+          <tr><td><b>Task:</b></td><td>{task_name}</td></tr>
+          <tr><td><b>Project:</b></td><td>{project_name}</td></tr>
+          <tr><td><b>Deadline:</b></td><td style="color:#e53935"><b>{deadline}</b></td></tr>
+        </table>
+      </div>
+    </div>"""
+    _send(engineer_email, f"[APPTS] ⚠️ Deadline Tomorrow: {task_name}", html)
+
+
+def notify_approval_request(admin_email: str, admin_name: str,
+                              new_user_name: str, new_user_email: str, role: str):
+    html = f"""
+    <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#7c5cfc;padding:20px;color:white"><h2 style="margin:0">👤 New User Awaiting Approval</h2></div>
+      <div style="padding:24px">
+        <p>Hi <b>{admin_name}</b>, a new user needs your approval.</p>
+        <table style="background:#f8f4ff;border-radius:8px;padding:16px;width:100%;margin:12px 0">
+          <tr><td><b>Name:</b></td><td>{new_user_name}</td></tr>
+          <tr><td><b>Email:</b></td><td>{new_user_email}</td></tr>
+          <tr><td><b>Role:</b></td><td>{role}</td></tr>
+        </table>
+        <p style="color:#666;font-size:13px">Log in to APPTS to approve or reject.</p>
+      </div>
+    </div>"""
     _send(admin_email, f"[APPTS] Approve User: {new_user_name}", html)
 
-def notify_user_approved(user_email, user_name):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Account Approved!</h2><p>Hi {user_name}, you can now log in to APPTS.</p></div>"
-    _send(user_email, "[APPTS] Account Approved", html)
 
-def notify_user_rejected(user_email, user_name, reason=""):
-    html = f"<div style='font-family:Arial;padding:20px'><h2>Account Not Approved</h2><p>Hi {user_name}.</p>{'<p>Reason: '+reason+'</p>' if reason else ''}</div>"
-    _send(user_email, "[APPTS] Account Not Approved", html)
+def notify_user_approved(user_email: str, user_name: str):
+    html = f"""
+    <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#22c55e;padding:20px;color:white"><h2 style="margin:0">✅ Account Approved!</h2></div>
+      <div style="padding:28px;text-align:center">
+        <p>Hi <b>{user_name}</b>,</p>
+        <p style="font-size:15px;margin:12px 0">Your APPTS account has been <b style="color:#22c55e">approved</b>.</p>
+        <p>You can now log in and start working on your projects.</p>
+      </div>
+    </div>"""
+    _send(user_email, "[APPTS] ✅ Your Account Has Been Approved", html)
+
+
+def notify_user_rejected(user_email: str, user_name: str, reason: str = ""):
+    html = f"""
+    <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#ef4444;padding:20px;color:white"><h2 style="margin:0">❌ Account Not Approved</h2></div>
+      <div style="padding:24px">
+        <p>Hi <b>{user_name}</b>,</p>
+        <p>Your APPTS account registration was not approved.</p>
+        {"<p><b>Reason:</b> " + reason + "</p>" if reason else ""}
+        <p style="color:#666;font-size:13px">Please contact your manager for more information.</p>
+      </div>
+    </div>"""
+    _send(user_email, "[APPTS] Account Registration Update", html)
