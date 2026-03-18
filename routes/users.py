@@ -149,7 +149,7 @@ def resend_otp(body: schemas.ResendOTPRequest, db: Session = Depends(get_db)):
     db.commit()
 
     _send_otp_email(user.email, user.name.strip(), otp)
-    return {"message": "New OTP sent. Check your email or ask admin for the code."}
+    return {"message": "New OTP sent.", "otp_for_emailjs": otp, "name": user.name.strip()}
 
 
 # ── LOGIN ─────────────────────────────────────────────────
