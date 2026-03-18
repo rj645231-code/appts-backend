@@ -4,77 +4,87 @@ from database import get_db
 import models, schemas
 from auth import hash_password, verify_password, create_access_token, get_current_user, require_role
 from datetime import datetime, timedelta
-import random, string, smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import random, string, os, json, urllib.request, urllib.error
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-SMTP_USER = "rvlife9269@gmail.com"
-SMTP_PASS = "uyqrrtunozxuwcmk"
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_H1uG8A3j_LftcqTBL6nD2vDdVv5xDEjuJ")
+
 
 def _generate_otp() -> str:
     return "".join(random.choices(string.digits, k=6))
 
 
-def _send_otp_email(to_email: str, name: str, otp: str):
-    """Send OTP email directly — all errors printed to terminal."""
-    print(f"\n{'='*60}")
-    print(f"  SENDING OTP EMAIL")
-    print(f"  TO:   {to_email}")
-    print(f"  NAME: {name}")
-    print(f"  OTP:  {otp}  <-- USE THIS CODE")
-    print(f"{'='*60}\n")
+def _send_email(to_email: str, subject: str, html: str) -> bool:
+    """Send email via Resend HTTPS API — no SMTP, no port issues."""
+    print(f"\n[EMAIL] Attempting to send to: {to_email}")
+    print(f"[EMAIL] Subject: {subject}")
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[APPTS] Your OTP Code: {otp}"
-        msg["From"] = SMTP_USER
-        msg["To"] = to_email
-        html = f"""
-        <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
-          <div style="background:#4f8ef7;padding:20px;color:white"><h2 style="margin:0">🔐 Verify Your Email — APPTS</h2></div>
-          <div style="padding:28px;text-align:center">
-            <p>Hi <b>{name}</b>, welcome to APPTS!</p>
-            <p>Your verification code is:</p>
-            <div style="font-size:44px;font-weight:700;letter-spacing:14px;color:#4f8ef7;padding:20px;background:#f0f6ff;border-radius:10px;margin:16px 0">{otp}</div>
-            <p style="color:#999;font-size:13px">Expires in 10 minutes.</p>
-          </div>
-        </div>"""
-        msg.attach(MIMEText(html, "html"))
+        payload = json.dumps({
+            "from": "APPTS <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+        }).encode("utf-8")
 
-        print(f"  Connecting to smtp.gmail.com:587 ...")
-        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=15)
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        print(f"  Logging in as {SMTP_USER} ...")
-        server.login(SMTP_USER, SMTP_PASS)
-        print(f"  Sending message ...")
-        server.sendmail(SMTP_USER, to_email, msg.as_string())
-        server.quit()
-        print(f"  ✅ OTP EMAIL SENT SUCCESSFULLY to {to_email}")
-    except smtplib.SMTPAuthenticationError as e:
-        print(f"  ❌ AUTH ERROR: {e}")
-        print(f"  Fix: regenerate App Password at myaccount.google.com/apppasswords")
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            print(f"[EMAIL] ✅ SUCCESS! Email ID: {result.get('id')}")
+            return True
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"[EMAIL] ❌ HTTP {e.code}: {body}")
+        return False
     except Exception as e:
-        print(f"  ❌ EMAIL ERROR: {type(e).__name__}: {e}")
-        print(f"  --> USE THE OTP ABOVE FROM THE TERMINAL INSTEAD")
+        print(f"[EMAIL] ❌ FAILED: {type(e).__name__}: {e}")
+        return False
+
+
+def _send_otp_email(to_email: str, name: str, otp: str):
+    print(f"\n{'='*60}")
+    print(f"  OTP FOR: {to_email}")
+    print(f"  CODE:    {otp}  <-- USE THIS")
+    print(f"{'='*60}\n")
+    html = f"""
+    <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;overflow:hidden">
+      <div style="background:#4f8ef7;padding:20px;color:white">
+        <h2 style="margin:0">🔐 Verify Your APPTS Account</h2>
+      </div>
+      <div style="padding:28px;text-align:center">
+        <p>Hi <b>{name}</b>, welcome to APPTS!</p>
+        <p style="color:#555">Your verification code is:</p>
+        <div style="font-size:48px;font-weight:bold;letter-spacing:16px;color:#4f8ef7;
+                    padding:20px;background:#f0f6ff;border-radius:10px;margin:20px 0">
+          {otp}
+        </div>
+        <p style="color:#999;font-size:13px">⏱ Expires in 10 minutes.</p>
+      </div>
+    </div>"""
+    success = _send_email(to_email, f"[APPTS] Your OTP Code: {otp}", html)
+    if not success:
+        print(f"[EMAIL] Email failed — user must use OTP from admin/logs: {otp}")
 
 
 # ── REGISTER ─────────────────────────────────────────────
 @router.post("/register")
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    print(f"\n[REGISTER] New registration attempt: {user.email}")
+    print(f"\n[REGISTER] {user.email}")
 
     existing = db.query(models.User).filter(models.User.email == user.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # First user ever = auto admin, auto approved, no approval needed
     is_first_user = db.query(models.User).count() == 0
-
     otp = _generate_otp()
-    otp_expires = datetime.utcnow() + timedelta(minutes=10)
 
     new_user = models.User(
         name=user.name,
@@ -84,7 +94,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         department=user.department,
         is_email_verified=False,
         email_otp=otp,
-        otp_expires_at=otp_expires,
+        otp_expires_at=datetime.utcnow() + timedelta(minutes=10),
         approval_status="approved" if is_first_user else "pending",
         approved_at=datetime.utcnow() if is_first_user else None,
     )
@@ -93,43 +103,26 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
 
     if is_first_user:
-        print(f"[REGISTER] 🌟 FIRST USER — auto-approved as Admin: {new_user.email}")
+        print(f"[REGISTER] First user — auto admin: {new_user.email}")
 
-    print(f"[REGISTER] User saved to DB. Sending OTP now...")
     _send_otp_email(new_user.email, new_user.name.strip(), otp)
-
-    # Notify admins/managers about new pending user
-    if not is_first_user:
-        approvers = db.query(models.User).filter(
-            models.User.role.in_(["admin", "manager"]),
-            models.User.approval_status == "approved",
-        ).all()
-        print(f"[REGISTER] Notifying {len(approvers)} approvers...")
-
-    msg = "Registration successful! You are the first user and have been set as Admin. Verify your email to continue." if is_first_user else "Registration successful. Check your email for OTP. If email fails, use the code printed in the server terminal."
-
     return {
-        "message": msg,
+        "message": "Registration successful. Check your email for OTP.",
         "email": new_user.email,
         "requires_verification": True,
-        "is_first_user": is_first_user,
     }
 
 
 # ── VERIFY OTP ────────────────────────────────────────────
 @router.post("/verify-otp")
 def verify_otp(body: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
-    print(f"\n[VERIFY OTP] Email: {body.email}, OTP entered: {body.otp}")
     user = db.query(models.User).filter(models.User.email == body.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.is_email_verified:
         return {"message": "Email already verified"}
-
-    print(f"[VERIFY OTP] Stored OTP: {user.email_otp}, Expires: {user.otp_expires_at}")
-
     if not user.email_otp or user.email_otp != body.otp:
-        raise HTTPException(status_code=400, detail=f"Invalid OTP. Check the server terminal for the correct code.")
+        raise HTTPException(status_code=400, detail="Invalid OTP. Check server logs for the code.")
     if user.otp_expires_at and datetime.utcnow() > user.otp_expires_at:
         raise HTTPException(status_code=400, detail="OTP expired. Click Resend OTP.")
 
@@ -137,7 +130,7 @@ def verify_otp(body: schemas.VerifyOTPRequest, db: Session = Depends(get_db)):
     user.email_otp = None
     user.otp_expires_at = None
     db.commit()
-    print(f"[VERIFY OTP] ✅ Email verified for {user.email}")
+    print(f"[VERIFY] ✅ {user.email} verified")
     return {"message": "Email verified! Waiting for admin approval."}
 
 
@@ -156,7 +149,7 @@ def resend_otp(body: schemas.ResendOTPRequest, db: Session = Depends(get_db)):
     db.commit()
 
     _send_otp_email(user.email, user.name.strip(), otp)
-    return {"message": "New OTP sent. Check email or server terminal."}
+    return {"message": "New OTP sent. Check your email or ask admin for the code."}
 
 
 # ── LOGIN ─────────────────────────────────────────────────
@@ -193,7 +186,14 @@ def approve_user(
     user.approved_by = current_user.id
     user.approved_at = datetime.utcnow()
     db.commit()
-    print(f"[APPROVE] {user.name} approved by {current_user.name}")
+
+    # notify via resend
+    background_tasks.add_task(
+        _send_email,
+        user.email,
+        "[APPTS] Account Approved ✅",
+        f"<div style='font-family:Arial;padding:20px'><h2>Account Approved!</h2><p>Hi {user.name.strip()}, you can now log in to APPTS.</p></div>"
+    )
     return {"message": f"{user.name.strip()} approved"}
 
 
@@ -212,35 +212,10 @@ def reject_user(
     user.approved_by = current_user.id
     user.approved_at = datetime.utcnow()
     db.commit()
-    print(f"[REJECT] {user.name} rejected by {current_user.name}")
     return {"message": f"{user.name.strip()} rejected"}
 
 
-# ── LIST ──────────────────────────────────────────────────
-@router.get("/pending", response_model=list[schemas.UserOut])
-def pending_users(db: Session = Depends(get_db), current_user=Depends(require_role("admin", "manager"))):
-    return db.query(models.User).filter(models.User.approval_status == "pending").all()
-
-
-@router.get("/me", response_model=schemas.UserOut)
-def get_me(current_user=Depends(get_current_user)):
-    return current_user
-
-
-@router.get("/", response_model=list[schemas.UserOut])
-def list_users(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return db.query(models.User).all()
-
-
-@router.get("/engineers", response_model=list[schemas.UserOut])
-def list_engineers(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return db.query(models.User).filter(
-        models.User.role == "engineer",
-        models.User.approval_status == "approved",
-    ).all()
-
-
-# ── DELETE USER (admin only) ──────────────────────────────
+# ── DELETE USER ───────────────────────────────────────────
 @router.delete("/{user_id}")
 def delete_user(
     user_id: int,
@@ -248,22 +223,17 @@ def delete_user(
     current_user=Depends(require_role("admin")),
 ):
     if user_id == current_user.id:
-        raise HTTPException(status_code=400, detail="You cannot delete yourself")
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    # Unassign their tasks first
     db.query(models.Task).filter(models.Task.assigned_to == user_id).update({"assigned_to": None})
     db.delete(user)
     db.commit()
-    print(f"[DELETE USER] {user.name} deleted by {current_user.name}")
-    return {"message": f"{user.name.strip()} has been removed"}
+    return {"message": f"{user.name.strip()} removed"}
 
 
-# ── CHANGE ROLE (admin only) ──────────────────────────────
-class RoleUpdate(schemas.BaseModel):
-    role: str
-
+# ── CHANGE ROLE ───────────────────────────────────────────
 from pydantic import BaseModel as PydanticBase
 class RoleUpdateBody(PydanticBase):
     role: str
@@ -276,14 +246,33 @@ def change_role(
     current_user=Depends(require_role("admin")),
 ):
     if user_id == current_user.id:
-        raise HTTPException(status_code=400, detail="You cannot change your own role")
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if body.role not in ("admin", "manager", "engineer"):
         raise HTTPException(status_code=400, detail="Invalid role")
-    old_role = user.role
     user.role = body.role
     db.commit()
-    print(f"[ROLE CHANGE] {user.name}: {old_role} → {body.role} by {current_user.name}")
     return {"message": f"{user.name.strip()} role changed to {body.role}"}
+
+
+# ── LIST ──────────────────────────────────────────────────
+@router.get("/pending", response_model=list[schemas.UserOut])
+def pending_users(db: Session = Depends(get_db), current_user=Depends(require_role("admin", "manager"))):
+    return db.query(models.User).filter(models.User.approval_status == "pending").all()
+
+@router.get("/me", response_model=schemas.UserOut)
+def get_me(current_user=Depends(get_current_user)):
+    return current_user
+
+@router.get("/", response_model=list[schemas.UserOut])
+def list_users(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return db.query(models.User).all()
+
+@router.get("/engineers", response_model=list[schemas.UserOut])
+def list_engineers(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    return db.query(models.User).filter(
+        models.User.role == "engineer",
+        models.User.approval_status == "approved",
+    ).all()
