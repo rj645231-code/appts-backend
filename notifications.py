@@ -3,7 +3,7 @@ import urllib.request
 import urllib.error
 import json
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_FMQr4MdT_D3pkFSP8JTc6XLciEYgD35z2")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_H1uG8A3j_LftcqTBL6nD2vDdVv5xDEjuJ")
 FROM_EMAIL = "onboarding@resend.dev"
 ENABLED = bool(RESEND_API_KEY)
 
