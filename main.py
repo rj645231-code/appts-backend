@@ -3,14 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import engine
 import models
 from routes import users, projects, tasks, comments
+from routes import google_auth
 
-# Create all tables on startup (including new task_comments table)
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="APPTS — Automated Project Progress Tracking System",
-    version="2.1",
-    description="Industry-grade project & task tracking with auto-assignment, comments, email alerts, and real-time analytics.",
+    version="3.0",
 )
 
 app.add_middleware(
@@ -25,8 +24,8 @@ app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
 app.include_router(comments.router)
+app.include_router(google_auth.router)
 
-
-@app.get("/", tags=["Health"])
+@app.get("/")
 def home():
-    return {"message": "APPTS API v2.1 running ✅", "docs": "/docs"}
+    return {"message": "APPTS API v3.0 running ✅"}
