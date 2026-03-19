@@ -43,6 +43,7 @@ class GoogleLoginRequest(BaseModel):
     token: str
     role: str = "engineer"
     department: str = ""
+    full_name: str = ""
 
 
 @router.post("/google")
@@ -55,7 +56,7 @@ def google_login(body: GoogleLoginRequest, db: Session = Depends(get_db)):
     google_data = verify_google_token(body.token)
 
     email = google_data.get("email")
-    name = google_data.get("name", email.split("@")[0])
+    name = body.full_name.strip() if body.full_name.strip() else google_data.get("name", email.split("@")[0])
     picture = google_data.get("picture", "")
 
     if not email:
