@@ -4,10 +4,18 @@ from database import engine
 import models
 from routes import users, projects, tasks, comments
 from routes import google_auth
-import urllib.request
 import json
 import os
+import google.generativeai as genai
 
+# ✅ Load API key safely
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# ✅ Configure Gemini only if key exists
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+# ✅ Create DB tables
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -15,6 +23,7 @@ app = FastAPI(
     version="3.0",
 )
 
+# ✅ CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,6 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ✅ Routers
 app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
@@ -33,55 +43,72 @@ app.include_router(google_auth.router)
 def home():
     return {"message": "APPTS API v3.0 running"}
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# ✅ AI Chat Route
 @app.post("/ai/chat")
 async def ai_chat(request: Request):
-    body = await request.json()
     if not GEMINI_API_KEY:
         return {"error": "GEMINI_API_KEY not configured on server"}
+
     try:
-        system_prompt = body.get("system", "You are a helpful AI assistant for APPTS project tracking.")
+        body = await request.json()
+
+        system_prompt = body.get(
+            "system",
+            "You are a helpful AI assistant for APPTS project tracking."
+        )
         messages = body.get("messages", [])
 
-        # Build Gemini contents - combine system + history
-        contents = []
-        # Add system as first user message
-        contents.append({
-            "role": "user",
-            "parts": [{"text": "SYSTEM INSTRUCTIONS: " + system_prompt + "\n\nAcknowledge and wait for my question."}]
-        })
-        contents.append({
-            "role": "model",
-            "parts": [{"text": "Understood! I am your APPTS AI assistant. How can I help you?"}]
-        })
-        # Add conversation history
+        # ✅ Build prompt
+        full_prompt = f"SYSTEM INSTRUCTIONS: {system_prompt}\n\n"
+
         for msg in messages:
-            role = "user" if msg["role"] == "user" else "model"
-            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            content = msg.get("content", "")
+            full_prompt += f"{role}: {content}\n"
 
-        payload = json.dumps({
-            "contents": contents,
-            "generationConfig": {
-                "maxOutputTokens": 1024,
-                "temperature": 0.7,
+        # ✅ Try multiple models (fallback system)
+        model_names = [
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-pro"
+        ]
+
+        response = None
+        last_error = None
+
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+
+                response = model.generate_content(
+                    full_prompt,
+                    generation_config={
+                        "max_output_tokens": 1024,
+                        "temperature": 0.7,
+                    }
+                )
+
+                if response and getattr(response, "text", None):
+                    break
+
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+        # ❌ If all models fail
+        if not response or not getattr(response, "text", None):
+            return {
+                "error": "All Gemini models failed",
+                "details": last_error
             }
-        }).encode("utf-8")
 
-        url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.0-pro:generateContent?key=" + GEMINI_API_KEY
+        # ✅ Success response
+        return {
+            "content": [
+                {"type": "text", "text": response.text}
+            ]
+        }
 
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
-            reply = result["candidates"][0]["content"]["parts"][0]["text"]
-            return {"content": [{"type": "text", "text": reply}]}
-    except urllib.error.HTTPError as e:
-        body_err = e.read().decode()
-        return {"error": "Gemini API error " + str(e.code) + ": " + body_err}
     except Exception as e:
         return {"error": str(e)}
