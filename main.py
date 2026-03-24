@@ -1,9 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine
 import models
 from routes import users, projects, tasks, comments
 from routes import google_auth
+import urllib.request
+import json
+import os
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -28,13 +31,7 @@ app.include_router(google_auth.router)
 
 @app.get("/")
 def home():
-    return {"message": "APPTS API v3.0 running ✅"}
-
-# ── AI CHAT PROXY ──────────────────────────────────────
-from fastapi import Request
-import urllib.request
-import json
-import os
+    return {"message": "APPTS API v3.0 running"}
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
@@ -42,12 +39,12 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 async def ai_chat(request: Request):
     body = await request.json()
     if not ANTHROPIC_API_KEY:
-        return {"error": "ANTHROPIC_API_KEY not set"}
+        return {"error": "ANTHROPIC_API_KEY not configured on server"}
     try:
         payload = json.dumps({
             "model": "claude-sonnet-4-20250514",
             "max_tokens": 1000,
-            "system": body.get("system", "You are an AI assistant for APPTS project tracking system."),
+            "system": body.get("system", "You are a helpful AI assistant for APPTS project tracking."),
             "messages": body.get("messages", []),
         }).encode("utf-8")
         req = urllib.request.Request(
@@ -64,6 +61,7 @@ async def ai_chat(request: Request):
             result = json.loads(resp.read())
             return {"content": result.get("content", [])}
     except urllib.error.HTTPError as e:
-        return {"error": "API error: " + str(e.code)}
+        body_err = e.read().decode()
+        return {"error": "Anthropic API error " + str(e.code) + ": " + body_err}
     except Exception as e:
         return {"error": str(e)}
