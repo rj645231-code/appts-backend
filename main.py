@@ -68,7 +68,7 @@ async def ai_chat(request: Request):
             }
         }).encode("utf-8")
 
-        url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=" + GEMINI_API_KEY 
+        url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.0-pro:generateContent?key=" + GEMINI_API_KEY
 
         req = urllib.request.Request(
             url,
